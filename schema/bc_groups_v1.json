@@ -1,0 +1,110 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://blendgmsh/schema/bc_groups_v1.json",
+    "title": "BC Groups Export",
+    "description": "Blender face group selections for FEM boundary condition assignment. Supports BREP mode (surface tags from STEP) and mesh mode (vertex coordinates from STL/OBJ).",
+    "type": "object",
+    "required": ["schema_version", "source", "units", "groups", "mesh_stats"],
+    "properties": {
+        "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "description": "Schema version -- increment when breaking changes are made"
+        },
+        "source": {
+            "type": "string",
+            "description": "Tool that produced this file"
+        },
+        "blender_version": {
+            "type": "string",
+            "description": "Blender version string e.g. '4.2.0'"
+        },
+        "mode": {
+            "type": "string",
+            "enum": ["brep", "mesh"],
+            "description": "brep: groups reference BREP surface tags (STEP import). mesh: groups carry vertex coordinates (STL/OBJ import)."
+        },
+        "step_file": {
+            "type": "string",
+            "description": "Path or filename of the source geometry file"
+        },
+        "units": {
+            "type": "string",
+            "enum": ["meters", "millimeters", "inches"],
+            "description": "World coordinate units in Blender scene"
+        },
+        "groups": {
+            "type": "object",
+            "description": "Named face groups -- keys are group names",
+            "additionalProperties": {
+                "type": "object",
+                "anyOf": [
+                    {
+                        "required": ["surface_tags"],
+                        "properties": {
+                            "description": {"type": "string"},
+                            "surface_tags": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "description": "BREP surface tag integers from the STEP file that belong to this group"
+                            }
+                        }
+                    },
+                    {
+                        "required": ["vertices", "face_vertex_indices", "vertex_count", "face_count"],
+                        "properties": {
+                            "description": {"type": "string"},
+                            "vertices": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                    "minItems": 3,
+                                    "maxItems": 3
+                                },
+                                "description": "World-space vertex coordinates [[x, y, z], ...]"
+                            },
+                            "face_vertex_indices": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {"type": "integer"},
+                                    "minItems": 3
+                                },
+                                "description": "Triangle face topology as indices into vertices array"
+                            },
+                            "vertex_count": {"type": "integer"},
+                            "face_count": {"type": "integer"}
+                        }
+                    }
+                ]
+            }
+        },
+        "mesh_stats": {
+            "type": "object",
+            "required": ["total_vertices", "total_faces", "bounding_box"],
+            "properties": {
+                "total_vertices": {"type": "integer"},
+                "total_faces": {"type": "integer"},
+                "bounding_box": {
+                    "type": "object",
+                    "required": ["min", "max"],
+                    "properties": {
+                        "min": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3
+                        },
+                        "max": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
