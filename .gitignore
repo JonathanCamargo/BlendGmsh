@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Claude Code
+.claude/
+
+# GSD planning intel
+.planning/intel/
+
+# Test / debug artifacts
+tests/problem_*/
+*.msh
+*.stl
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
