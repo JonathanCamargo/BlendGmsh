@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blendgmsh"
+version = "0.1.0"
+description = "Blender-to-Gmsh boundary condition workflow: visual face selection in Blender, Gmsh physical groups on output."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "gmsh",
+    "scipy",
+    "jsonschema",
+    "numpy",
+]
+
+[project.optional-dependencies]
+viz = ["pyvista"]
+dev = ["pytest"]
+
+[project.scripts]
+blendgmsh = "matching_library.__main__:main"
+
+[tool.setuptools]
+packages = ["matching_library", "step_converter", "visualization"]
