@@ -42,20 +42,54 @@ class FEMBCMainProps(bpy.types.PropertyGroup):
         description="Status of the last mesh generation attempt",
         default="",
     )
+    mesh_warning: bpy.props.StringProperty(
+        name="Mesh Warning",
+        description="Problems found when checking the generated .msh (e.g. groups that did not match)",
+        default="",
+    )
+    mesh_log_path: bpy.props.StringProperty(
+        name="Mesh Log",
+        description="Log file of the last mesh generation run",
+        subtype='FILE_PATH',
+        default="",
+    )
+    groups_object: bpy.props.StringProperty(
+        name="Tagged Object",
+        description="Object the face groups were last assigned on",
+        default="",
+    )
+    show_more: bpy.props.BoolProperty(name="More", default=False)
+
+
+def _color_changed(self, context):
+    mat = bpy.data.materials.get(f"FEMBC_{self.name}")
+    if mat is not None:
+        mat.diffuse_color = (*self.color, 1.0)
 
 
 class FEMBCGroupItem(bpy.types.PropertyGroup):
-    # name is inherited from PropertyGroup -- used by UIList for display and ctrl-click rename
+    # name is inherited from PropertyGroup -- used by UIList for display and double-click rename.
+    # Renames are propagated to the vertex group / material by operators._sync_group_names().
     color: bpy.props.FloatVectorProperty(
         name="Color",
         subtype='COLOR',
         size=3,
         min=0.0, max=1.0,
         default=(1.0, 1.0, 1.0),
+        update=_color_changed,
     )
     surface_tags: bpy.props.StringProperty(
         name="Surface Tags",
         description="Cached JSON list of BREP surface tags assigned to this group",
+        default="",
+    )
+    assigned: bpy.props.IntProperty(
+        name="Assigned",
+        description="CAD surfaces (BREP) or faces (mesh) in this group; -1 = not counted yet",
+        default=-1,
+    )
+    prev_name: bpy.props.StringProperty(
+        description="Name the vertex group / material currently use (rename tracking)",
         default="",
     )
 

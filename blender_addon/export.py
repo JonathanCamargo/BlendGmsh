@@ -45,7 +45,8 @@ def detect_bc_mode(obj):
     return "mesh"
 
 
-def build_bc_groups_dict(obj, groups, step_filepath, blender_version, units="meters"):
+def build_bc_groups_dict(obj, groups, step_filepath, blender_version, units="meters",
+                         triangles=None):
     """Build a bc_groups_v1-conforming dict from a mesh object and face groups.
 
     Auto-detects BREP vs mesh mode from vertex groups:
@@ -70,6 +71,10 @@ def build_bc_groups_dict(obj, groups, step_filepath, blender_version, units="met
         Blender version string e.g. "4.2.0".
     units : str
         World coordinate units, one of "meters", "millimeters", "inches".
+    triangles : list of (int, int, int), optional
+        Mesh mode only: triangulated faces (vertex index triples) to use instead
+        of obj.data.polygons. Must match the triangulation written to the STL
+        handed to the mesher so that face centroids line up.
 
     Returns
     -------
@@ -81,7 +86,7 @@ def build_bc_groups_dict(obj, groups, step_filepath, blender_version, units="met
     if mode == "brep":
         groups_out = _build_brep_groups(obj, groups)
     else:
-        groups_out = _build_mesh_groups(obj, groups)
+        groups_out = _build_mesh_groups(obj, groups, triangles)
 
     mesh = obj.data
     matrix_world = obj.matrix_world
@@ -182,7 +187,7 @@ def _build_brep_groups(obj, groups):
     return groups_out
 
 
-def _build_mesh_groups(obj, groups):
+def _build_mesh_groups(obj, groups, triangles=None):
     """Build mesh mode groups: each BC group -> vertex coords + face topology."""
     mesh = obj.data
     matrix_world = obj.matrix_world
@@ -213,10 +218,12 @@ def _build_mesh_groups(obj, groups):
         index_map = {orig: local for local, orig in enumerate(assigned_sorted)}
 
         # Find faces where ALL polygon vertices are in this group
+        face_list = (triangles if triangles is not None
+                     else [poly.vertices for poly in mesh.polygons])
         group_faces = []
-        for poly in mesh.polygons:
-            if all(vi in assigned_indices for vi in poly.vertices):
-                local_face = [index_map[vi] for vi in poly.vertices]
+        for face in face_list:
+            if all(vi in assigned_indices for vi in face):
+                local_face = [index_map[vi] for vi in face]
                 group_faces.append(local_face)
 
         if not world_verts:
@@ -230,3 +237,21 @@ def _build_mesh_groups(obj, groups):
         }
 
     return groups_out
+
+
+def write_binary_stl(path, vertices, triangles):
+    """Write a binary STL from world-space vertex coords and index triples."""
+    import struct
+    with open(path, "wb") as f:
+        f.write(b"BlendGmsh native object".ljust(80, b"\0"))
+        f.write(struct.pack("<I", len(triangles)))
+        for a, b, c in triangles:
+            v0, v1, v2 = vertices[a], vertices[b], vertices[c]
+            ux, uy, uz = (v1[i] - v0[i] for i in range(3))
+            wx, wy, wz = (v2[i] - v0[i] for i in range(3))
+            n = (uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx)
+            length = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) ** 0.5 or 1.0
+            f.write(struct.pack("<3f", *(x / length for x in n)))
+            for v in (v0, v1, v2):
+                f.write(struct.pack("<3f", *v))
+            f.write(b"\0\0")

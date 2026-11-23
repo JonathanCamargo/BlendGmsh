@@ -1,12 +1,31 @@
 """
 BlendGmsh addon panel.
 
-Implements FEMBC_PT_MainPanel per the UI-SPEC Panel Layout Contract.
-All copy strings are taken verbatim from the UI-SPEC Copywriting Contract.
+One panel, three numbered steps (part -> face groups -> volume mesh), each with a
+done/pending marker, so the next action is always visible. It lives in the "FEA"
+sidebar tab, above the FEniCSx add-on's panels when that is installed.
 """
+import os
 import textwrap
 
 import bpy  # type: ignore  # available inside Blender runtime
+
+from . import operators as ops
+
+
+def _wrap(layout, text, width=42, icon='NONE', alert=False, active=True):
+    col = layout.column(align=True)
+    col.alert = alert
+    col.active = active
+    for i, line in enumerate(textwrap.wrap(text, width) or [""]):
+        col.label(text=line, icon=icon if i == 0 else ('BLANK1' if icon != 'NONE' else 'NONE'))
+    return col
+
+
+def _step(layout, number, title, done):
+    box = layout.box()
+    box.label(text=f"{number}. {title}", icon='CHECKMARK' if done else 'RADIOBUT_OFF')
+    return box
 
 
 class FEMBC_UL_GroupList(bpy.types.UIList):
@@ -17,109 +36,131 @@ class FEMBC_UL_GroupList(bpy.types.UIList):
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
             row = layout.row(align=True)
             row.prop(item, "color", text="", emboss=True)
-            row.prop(item, "name", text="", emboss=False, icon_value=icon)
+            row.prop(item, "name", text="", emboss=False)
+            n = ops.group_count(item)
+            sub = row.row()
+            sub.alignment = 'RIGHT'
+            if n == 0:
+                sub.alert = True
+                sub.label(text="empty")
+            elif n > 0:
+                unit = "surf" if ops._is_brep(context.active_object) else "faces"
+                sub.label(text=f"{n} {unit}")
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text="", icon_value=icon)
 
 
 class FEMBC_PT_MainPanel(bpy.types.Panel):
-    bl_label = "FEM BC"
-    bl_category = "FEM BC"
+    bl_label = "Mesh & Face Groups"
+    bl_category = "FEA"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
+    bl_order = 0
 
     def draw(self, context):
         layout = self.layout
-        props = context.scene.fembc_main
+        scene = context.scene
+        props = scene.fembc_main
+        obj = context.active_object
+        is_mesh = obj is not None and obj.type == 'MESH'
+        is_result = is_mesh and "fea_job" in obj
+        brep = ops._is_brep(obj)
 
-        # --- Error / warning alert box ---
         if props.last_error:
             box = layout.box()
-            box.alert = True
-            box.label(text="Warning:", icon='ERROR')
-            for line in textwrap.wrap(props.last_error, width=80):
-                box.label(text=line)
+            _wrap(box, props.last_error, icon='ERROR', alert=True)
 
-        # --- Import section ---
-        layout.label(text="Import STEP")
-        layout.operator("fembc.import_step", text="Import STEP File", icon='IMPORT')
-        layout.operator("fembc.import_mesh", text="Import STL/OBJ", icon='IMPORT')
-
-        layout.separator(factor=2.0)
-
-        # --- Status section ---
-        layout.label(text="Status")
-        face_count = props.face_count
-        bc_mode = props.bc_mode if props.bc_mode else self._detect_mode(context)
-
-        if face_count == -1:
-            layout.label(text="No geometry imported", icon='INFO')
-        elif face_count == 0:
-            layout.label(text="Converting...", icon='TIME')
-        else:
-            if bc_mode == "brep":
-                layout.label(text=f"Ready: {face_count} BREP surfaces", icon='CHECKMARK')
-                box = layout.box()
-                box.label(text="BREP mode (STEP import)", icon='MESH_ICOSPHERE')
-                box.label(text="Selection maps to whole CAD surfaces.")
-                box.label(text="Select any triangle on a surface to")
-                box.label(text="include the entire BREP face in the group.")
-            elif bc_mode == "mesh":
-                layout.label(text=f"Ready: {face_count} faces", icon='CHECKMARK')
-                box = layout.box()
-                box.label(text="Mesh mode (STL/OBJ)", icon='MESH_GRID')
-                box.label(text="Selection maps to individual triangles.")
-                box.label(text="Only selected triangles are included.")
-            else:
-                layout.label(text=f"Ready: {face_count} faces detected", icon='CHECKMARK')
-
-        # --- Face Groups section ---
-        layout.separator()
-        layout.label(text="Face Groups", icon='GROUP_VERTEX')
-        box = layout.box()
-        box.template_list(
-            "FEMBC_UL_group_list", "",
-            context.scene, "fembc_groups",
-            context.scene, "fembc_groups_active_index",
-            rows=3,
-        )
+        # --- 1. Part --------------------------------------------------------
+        box = _step(layout, 1, "Part", is_mesh and not is_result)
         row = box.row(align=True)
-        row.operator("fembc.add_group", text="", icon='ADD')
-        row.operator("fembc.remove_group", text="", icon='REMOVE')
-
-        layout.separator()
-        if bc_mode == "brep":
-            layout.operator("fembc.assign_faces",
-                            text="Assign Selected Faces (BREP surfaces)")
+        row.operator("fembc.import_step", text="STEP", icon='IMPORT')
+        row.operator("fembc.import_mesh", text="STL / OBJ", icon='IMPORT')
+        if not is_mesh:
+            _wrap(box, "Import a part, or select a mesh object", icon='INFO')
+        elif is_result:
+            _wrap(box, f"'{obj.name}' is an FEA result. Select the original part.",
+                  icon='ERROR', alert=True)
         else:
-            layout.operator("fembc.assign_faces",
-                            text="Assign Selected Faces")
-        layout.separator()
+            if brep:
+                kind = (f"{props.face_count} CAD surfaces" if props.face_count > 0
+                        else "CAD part (STEP)")
+            elif obj.get("fembc_source"):
+                kind = f"{len(obj.data.polygons)} triangles (STL/OBJ)"
+            else:
+                kind = "Blender object"
+            box.label(text=f"{obj.name} · {kind}",
+                      icon='MESH_ICOSPHERE' if brep else 'MESH_GRID')
 
-        # --- Export section ---
-        layout.operator("fembc.export_json", text="Export to JSON")
+        # --- 2. Face groups -------------------------------------------------
+        groups = scene.fembc_groups
+        counts = [ops.group_count(g) for g in groups]
+        box = _step(layout, 2, "Face groups", any(c > 0 for c in counts))
+        row = box.row()
+        row.template_list("FEMBC_UL_group_list", "", scene, "fembc_groups",
+                          scene, "fembc_groups_active_index", rows=3)
+        col = row.column(align=True)
+        col.operator("fembc.add_group", text="", icon='ADD')
+        col.operator("fembc.remove_group", text="", icon='REMOVE')
 
-        # --- Generate Mesh section ---
-        layout.separator()
-        layout.label(text="Generate Mesh")
-        layout.operator("fembc.generate_mesh", text="Generate Mesh", icon='MOD_SOLIDIFY')
-        if props.mesh_status:
-            layout.label(text=props.mesh_status, icon='INFO')
-        if props.msh_output_path:
-            for line in textwrap.wrap(props.msh_output_path, width=40):
-                layout.label(text=line)
+        tagged_on = props.groups_object
+        if is_mesh and tagged_on and tagged_on != obj.name and tagged_on in bpy.data.objects:
+            _wrap(box, f"These groups belong to '{tagged_on}'. Select it to edit them.",
+                  icon='ERROR', alert=True)
 
-    def _detect_mode(self, context):
-        """Detect BREP vs mesh mode from the active object's vertex groups."""
-        obj = context.active_object
-        if obj is None or obj.type != 'MESH':
-            return ""
-        import re
-        for vg in obj.vertex_groups:
-            if re.match(r"^face_\d+$", vg.name):
-                return "brep"
-        # If we have vertex groups but none are face_N, it's mesh mode
-        if len(obj.vertex_groups) > 0:
-            return "mesh"
-        return ""
+        r = box.row(align=True)
+        r.scale_y = 1.3
+        if context.mode == 'EDIT_MESH':
+            r.operator("fembc.assign_faces", text="Assign", icon='ADD')
+            r.operator("fembc.unassign_faces", text="Remove", icon='REMOVE')
+            r.operator("fembc.select_group", text="Select", icon='RESTRICT_SELECT_OFF')
+            _wrap(box, "Clicking one triangle picks the whole CAD face" if brep
+                  else "Only the selected faces are used", icon='INFO', active=False)
+        else:
+            r.operator("fembc.edit_faces", text="Pick Faces", icon='EDITMODE_HLT')
+            r.operator("fembc.select_group", text="Show Group", icon='RESTRICT_SELECT_OFF')
+
+        if not groups:
+            _wrap(box, "Add a group (+) for each support and each load",
+                  icon='INFO', active=False)
+        elif not any(c > 0 for c in counts):
+            _wrap(box, "Pick faces, then Assign them to the highlighted group. "
+                       "Grey faces are in no group", icon='INFO', active=False)
+        else:
+            _wrap(box, "Double-click a name to rename. Grey faces stay free in the analysis",
+                  icon='INFO', active=False)
+
+        # --- 3. Volume mesh -------------------------------------------------
+        have_msh = bool(props.msh_output_path) and os.path.isfile(props.msh_output_path)
+        running = ops.mesh_running()
+        box = _step(layout, 3, "Volume mesh", have_msh and not running)
+        r = box.row()
+        r.scale_y = 1.4
+        r.operator("fembc.generate_mesh", text="Generate Mesh", icon='MOD_SOLIDIFY')
+        if running:
+            box.label(text=f"Generating mesh ... {ops.mesh_elapsed():.0f} s", icon='TIME')
+        else:
+            why = ops.generate_blocker(context)
+            if why:
+                _wrap(box, why, icon='INFO', active=False)
+            if props.mesh_status and props.mesh_status != "Generating mesh...":
+                failed = "failed" in props.mesh_status
+                _wrap(box, props.mesh_status, icon='ERROR' if failed else 'CHECKMARK',
+                      alert=failed)
+            if props.mesh_warning:
+                _wrap(box, props.mesh_warning, icon='ERROR', alert=True)
+        if have_msh or props.mesh_log_path:
+            r = box.row(align=True)
+            r.label(text=os.path.basename(props.msh_output_path) if have_msh else "Log",
+                    icon='FILE' if have_msh else 'TEXT')
+            r.operator("fembc.open_mesh_folder", text="", icon='FILE_FOLDER')
+            r.operator("fembc.open_mesh_log", text="", icon='TEXT')
+        if have_msh and not running and hasattr(scene, "fx_cae"):
+            _wrap(box, "Next: supports & loads in the FEniCSx Job panel below",
+                  icon='FORWARD', active=False)
+
+        # --- More -----------------------------------------------------------
+        layout.prop(props, "show_more", emboss=False,
+                    icon='DISCLOSURE_TRI_DOWN' if props.show_more else 'DISCLOSURE_TRI_RIGHT')
+        if props.show_more:
+            layout.operator("fembc.export_json", text="Export Groups to JSON", icon='EXPORT')

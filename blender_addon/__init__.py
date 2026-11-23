@@ -30,7 +30,7 @@ except ModuleNotFoundError:
 
 def _ensure_dependencies():
     """Install missing Python dependencies into Blender's Python."""
-    import importlib
+    import importlib.util
     import subprocess
     import sys
 
@@ -57,8 +57,13 @@ if _BPY_AVAILABLE:
         FEMBC_OT_AddGroup,
         FEMBC_OT_RemoveGroup,
         FEMBC_OT_AssignFaces,
+        FEMBC_OT_UnassignFaces,
+        FEMBC_OT_SelectGroup,
+        FEMBC_OT_EditFaces,
         FEMBC_OT_ExportJSON,
         FEMBC_OT_GenerateMesh,   # NEW Phase 7
+        FEMBC_OT_OpenMeshLog,
+        FEMBC_OT_OpenMeshFolder,
     )
     from .panels import FEMBC_UL_GroupList, FEMBC_PT_MainPanel
 
@@ -70,11 +75,24 @@ if _BPY_AVAILABLE:
         FEMBC_OT_AddGroup,
         FEMBC_OT_RemoveGroup,
         FEMBC_OT_AssignFaces,
+        FEMBC_OT_UnassignFaces,
+        FEMBC_OT_SelectGroup,
+        FEMBC_OT_EditFaces,
         FEMBC_OT_ExportJSON,
         FEMBC_OT_GenerateMesh,   # NEW Phase 7
+        FEMBC_OT_OpenMeshLog,
+        FEMBC_OT_OpenMeshFolder,
         FEMBC_UL_GroupList,
         FEMBC_PT_MainPanel,
     )
+
+    @bpy.app.handlers.persistent
+    def _clear_stale_mesh_status(_dummy):
+        """A .blend saved mid-run still says 'Generating mesh...' with no process behind it."""
+        for scene in bpy.data.scenes:
+            p = getattr(scene, "fembc_main", None)
+            if p is not None and p.mesh_status == "Generating mesh...":
+                p.mesh_status = "Mesh generation was interrupted - generate again"
 else:
     classes = ()  # type: ignore[assignment]
 
@@ -93,6 +111,8 @@ def register():
     bpy.types.Scene.fembc_main = bpy.props.PointerProperty(type=FEMBCMainProps)
     bpy.types.Scene.fembc_groups = bpy.props.CollectionProperty(type=FEMBCGroupItem)
     bpy.types.Scene.fembc_groups_active_index = bpy.props.IntProperty(default=0)
+    if _clear_stale_mesh_status not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_clear_stale_mesh_status)
 
 
 def unregister():
@@ -101,6 +121,8 @@ def unregister():
     import bpy  # noqa: F811
     from bpy.utils import unregister_class
 
+    if _clear_stale_mesh_status in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_clear_stale_mesh_status)
     if hasattr(bpy.types.Scene, "fembc_groups_active_index"):
         del bpy.types.Scene.fembc_groups_active_index
     if hasattr(bpy.types.Scene, "fembc_groups"):
