@@ -39,6 +39,29 @@ _mesh_expected: list = []    # group names sent to the mesher, checked against t
 _mesh_t0: float = 0.0        # start time (a float32 Blender property can't hold a timestamp)
 
 
+def lib_dir():
+    """Folder holding the matching_library / step_converter packages.
+
+    Installed zip (export.ps1/.sh): bundled inside the add-on folder.
+    Source checkout (e.g. VS Code 'Blender Development' links blender_addon/):
+    they sit next to it, in the repository root.
+    """
+    # realpath: a linked add-on's parent must be the repository, not the link's folder
+    addon_dir = os.path.dirname(os.path.realpath(__file__))
+    for d in (addon_dir, os.path.dirname(addon_dir)):
+        if os.path.isfile(os.path.join(d, "matching_library", "__main__.py")):
+            return d
+    raise RuntimeError(
+        "BlendGmsh is incomplete: 'matching_library' was not found in "
+        f"{addon_dir} or its parent folder. Reinstall the add-on from the zip made by export.ps1.")
+
+
+def _ensure_lib_path():
+    d = lib_dir()
+    if d not in sys.path:
+        sys.path.insert(0, d)
+
+
 def _start_tagging(op, context, obj):
     """After an import: keep the group names, empty them (old tags belong to the
     previous part) and show the new part grey = nothing assigned yet."""
@@ -133,6 +156,7 @@ class FEMBC_OT_ImportSTEP(bpy.types.Operator):
             surface_count += 1
 
         # Fused-face detection
+        _ensure_lib_path()
         from step_converter import check_fused_faces
         warnings = check_fused_faces(
             expected=mesh_data.get("n_surfaces", 0),
@@ -159,12 +183,7 @@ class FEMBC_OT_ImportSTEP(bpy.types.Operator):
 
     def _run_tessellation(self, step_path: str) -> dict:
         """Run tessellate_step_to_mesh() directly — deps are installed at register time."""
-        import sys
-        # step_converter/ is bundled inside the addon directory
-        addon_dir = os.path.dirname(os.path.abspath(__file__))
-        if addon_dir not in sys.path:
-            sys.path.insert(0, addon_dir)
-
+        _ensure_lib_path()
         from step_converter import tessellate_step_to_mesh
         return tessellate_step_to_mesh(step_path)
 
@@ -1044,7 +1063,12 @@ class FEMBC_OT_GenerateMesh(bpy.types.Operator):
         # in a background thread. The CLI entry point
         # `python -m matching_library run` is already available.
         # Output goes to a log file: an unread PIPE can fill up and stall the mesher.
-        addon_dir = os.path.dirname(os.path.abspath(__file__))
+        try:
+            lib = lib_dir()
+        except RuntimeError as exc:
+            props.mesh_status = f"Mesh generation failed: {exc}"
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
         _mesh_output_path = output_msh
         _mesh_scene = scene.name
         _mesh_expected = list(bc_dict["groups"])
@@ -1052,7 +1076,7 @@ class FEMBC_OT_GenerateMesh(bpy.types.Operator):
         _mesh_proc = subprocess.Popen(
             [sys.executable, "-m", "matching_library", "run",
              tmp_json, source_path, output_msh],
-            env={**os.environ, "PYTHONPATH": addon_dir, "PYTHONUNBUFFERED": "1"},
+            env={**os.environ, "PYTHONPATH": lib, "PYTHONUNBUFFERED": "1"},
             stdout=_mesh_log_fh,
             stderr=subprocess.STDOUT,
             text=True,
