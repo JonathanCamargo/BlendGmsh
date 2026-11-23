@@ -1,5 +1,40 @@
 # BlendGmsh
 
+> [!IMPORTANT]
+> **BlendGmsh is superseded by [BlendFEA](../BlendFEA)** and is no longer developed here.
+>
+> BlendFEA merges this add-on (face groups + Gmsh meshing) with the FEniCSx CAE add-on
+> (material, supports, loads, solving, results) into one Blender extension. Everything
+> BlendGmsh does is in its steps 1-3, with these improvements:
+>
+> - **One install, nothing pip-installed:** per-platform packages (Windows, Linux, macOS)
+>   bundle gmsh. scipy is no longer needed.
+> - **Clear tagging:** unassigned faces show grey and each group shows its face count.
+>   You also get Remove and Select buttons, safe renames, and a reason whenever Generate
+>   Mesh is disabled.
+> - **Meshes saved next to the .blend** (`fea/`) instead of the shared temp folder.
+> - **The mesher works without Blender:** run `pip install .` in the BlendFEA repo
+>   (package `blendfea-mesher`), then `blendfea-mesh run bc_groups.json model.step out.msh`.
+>   It's the same `matching_library` CLI and the same `bc_groups_v1` JSON.
+>
+> **Moving over:** install BlendFEA (Blender 5.0+) and click **Disable old add-ons** in
+> the warning its panels show. That switches BlendGmsh off. Existing .blend files keep
+> their face groups: BlendFEA reads the same scene data.
+>
+> Where things went:
+>
+> | Here | In BlendFEA |
+> |---|---|
+> | `blender_addon/` | `blendfea/mesh/` |
+> | `matching_library/`, `step_converter/` | `blendfea/lib/` |
+> | `schema/bc_groups_v1.json` | `blendfea/lib/matching_library/schema/` |
+> | `tests/` | `tests/lib/` |
+> | `export.sh`, `export.ps1` | `scripts/build.py` |
+>
+> The documentation below describes the last BlendGmsh version and is kept for reference only.
+
+---
+
 A Blender-to-Gmsh boundary condition workflow. Visually select faces on a CAD model in Blender, then auto-assign those selections as Gmsh physical groups -- producing a tagged `.msh` file ready for any FEM solver.
 
 ## How It Works
